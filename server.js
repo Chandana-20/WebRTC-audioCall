@@ -10,6 +10,11 @@ const wss = new WebSocket.Server({ server });
 // Serve static files
 app.use(express.static(path.join(__dirname, 'public')));
 
+// Basic route for the home page
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
 // Store active connections
 const webrtc_discussions = new Map();
 let waitingCallers = new Set();
@@ -43,13 +48,17 @@ wss.on('connection', (ws) => {
     }));
 
     ws.on('message', (message) => {
-        const data = JSON.parse(message);
-        // Forward the message to the other peer
-        for (const [token, client] of webrtc_discussions.entries()) {
-            if (token === call_token && client !== ws) {
-                client.send(message);
-                break;
+        try {
+            const data = JSON.parse(message);
+            // Forward the message to the other peer
+            for (const [token, client] of webrtc_discussions.entries()) {
+                if (token === call_token && client !== ws) {
+                    client.send(message.toString());
+                    break;
+                }
             }
+        } catch (error) {
+            console.error('Error processing message:', error);
         }
     });
 
@@ -57,9 +66,22 @@ wss.on('connection', (ws) => {
         waitingCallers.delete(call_token);
         webrtc_discussions.delete(call_token);
     });
+
+    ws.on('error', (error) => {
+        console.error('WebSocket error:', error);
+    });
 });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
+server.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on port ${PORT}`);
+});
+
+// Handle server errors
+server.on('error', (error) => {
+    console.error('Server error:', error);
+});
+
+process.on('unhandledRejection', (error) => {
+    console.error('Unhandled rejection:', error);
 });
