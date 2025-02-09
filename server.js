@@ -13,72 +13,60 @@ let waitingCallers = new Set();
 
 io.on('connection', (socket) => {
     console.log('User connected:', socket.id);
-    
-    const isCallee = waitingCallers.size > 0;
+
+    let isCaller = true;
     let call_token;
 
-    if (isCallee && waitingCallers.size > 0) {
-        // Find an available caller
-        for (const caller_token of waitingCallers) {
-            if (webrtc_discussions.has(caller_token)) {
-                call_token = caller_token;
-                waitingCallers.delete(caller_token);
-                break;
-            }
-        }
+    // Check if there's an available caller
+    if (waitingCallers.size > 0) {
+        // Assign to the first available caller
+        call_token = [...waitingCallers][0];
+        waitingCallers.delete(call_token);
+        isCaller = false; // This user is a callee
     } else {
-        // Create new caller session
+        // Create a new session for the caller
         call_token = Date.now().toString();
         waitingCallers.add(call_token);
     }
 
+    // Store the socket in discussions
     webrtc_discussions.set(call_token, socket);
 
-    // Send initial role assignment
-    socket.emit('role', {
-        isCaller: !isCallee,
-        call_token: call_token
-    });
+    // Notify the client of their role
+    socket.emit('role', { isCaller, call_token });
 
     // Handle WebRTC signaling
     socket.on('offer', (data) => {
-        for (const [token, peer] of webrtc_discussions.entries()) {
-            if (token === call_token && peer !== socket) {
-                peer.emit('offer', data);
-                break;
-            }
+        const peer = webrtc_discussions.get(call_token);
+        if (peer && peer !== socket) {
+            peer.emit('offer', data);
         }
     });
 
     socket.on('answer', (data) => {
-        for (const [token, peer] of webrtc_discussions.entries()) {
-            if (token === call_token && peer !== socket) {
-                peer.emit('answer', data);
-                break;
-            }
+        const peer = webrtc_discussions.get(call_token);
+        if (peer && peer !== socket) {
+            peer.emit('answer', data);
         }
     });
 
     socket.on('candidate', (data) => {
-        for (const [token, peer] of webrtc_discussions.entries()) {
-            if (token === call_token && peer !== socket) {
-                peer.emit('candidate', data);
-                break;
-            }
+        const peer = webrtc_discussions.get(call_token);
+        if (peer && peer !== socket) {
+            peer.emit('candidate', data);
         }
     });
 
+    // Handle disconnections
     socket.on('disconnect', () => {
         console.log('User disconnected:', socket.id);
         waitingCallers.delete(call_token);
         webrtc_discussions.delete(call_token);
-        
-        // Notify peers about disconnection
-        for (const [token, peer] of webrtc_discussions.entries()) {
-            if (token === call_token && peer !== socket) {
-                peer.emit('peerDisconnected');
-                break;
-            }
+
+        // Notify the peer of disconnection
+        const peer = webrtc_discussions.get(call_token);
+        if (peer) {
+            peer.emit('peerDisconnected');
         }
     });
 });

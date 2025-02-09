@@ -2,6 +2,7 @@ let peerConnection;
 let localStream;
 let socket;
 let isCaller = false;
+let candidateBuffer = []; // Buffer for ICE candidates
 
 const configuration = {
     iceServers: [
@@ -44,7 +45,7 @@ async function setupCall() {
         document.getElementById('hangupButton').disabled = false;
 
         peerConnection = new RTCPeerConnection(configuration);
-        
+
         localStream.getTracks().forEach(track => {
             peerConnection.addTrack(track, localStream);
         });
@@ -62,9 +63,15 @@ async function setupCall() {
             }
         };
 
-        peerConnection.oniceconnectionstatechange = () => {
+        peerConnection.onconnectionstatechange = () => {
             document.getElementById('status').textContent = 
-                `Connection state: ${peerConnection.iceConnectionState}`;
+                `Connection state: ${peerConnection.connectionState}`;
+            if (peerConnection.connectionState === 'connected') {
+                candidateBuffer.forEach(async (candidate) => {
+                    await peerConnection.addIceCandidate(candidate);
+                });
+                candidateBuffer = [];
+            }
         };
 
         if (isCaller) {
@@ -100,8 +107,10 @@ async function handleAnswer(answer) {
 
 async function handleCandidate(candidate) {
     try {
-        if (candidate) {
+        if (peerConnection) {
             await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+        } else {
+            candidateBuffer.push(candidate); // Buffer the candidate if connection is not ready
         }
     } catch (error) {
         console.error('Error handling candidate:', error);
