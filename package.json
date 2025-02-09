@@ -1,0 +1,13 @@
+{
+    "name": "webrtc-audio-call",
+    "version": "1.0.0",
+    "description": "Simple WebRTC audio call application",
+    "main": "server.js",
+    "scripts": {
+      "start": "node server.js"
+    },
+    "dependencies": {
+      "express": "^4.17.1",
+      "ws": "^8.2.3"
+    }
+  }

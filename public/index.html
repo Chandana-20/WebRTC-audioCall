@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WebRTC Audio Call</title>
+    <style>
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+            text-align: center;
+        }
+        .status {
+            margin: 20px 0;
+            padding: 10px;
+            border-radius: 4px;
+        }
+        .controls {
+            margin: 20px 0;
+        }
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>WebRTC Audio Call</h1>
+        <div id="status" class="status">Connecting to server...</div>
+        <div class="controls">
+            <button id="muteButton" onclick="toggleMute()" disabled>Mute</button>
+            <button id="hangupButton" onclick="hangup()" disabled>Hang Up</button>
+        </div>
+        <audio id="remoteAudio" autoplay></audio>
+    </div>
+    <script src="client.js"></script>
+</body>
+</html>
