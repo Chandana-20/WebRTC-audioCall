@@ -1,7 +1,6 @@
-// File: public/client.js
 let peerConnection;
 let localStream;
-let ws;
+let socket;
 let isCaller = false;
 
 const configuration = {
@@ -11,41 +10,31 @@ const configuration = {
 };
 
 function connect() {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}`;
-    ws = new WebSocket(wsUrl);
+    // Connect to signaling server
+    socket = io();
 
-    ws.onmessage = async (event) => {
-        const data = JSON.parse(event.data);
+    socket.on('role', async (data) => {
+        isCaller = data.isCaller;
+        document.getElementById('status').textContent = 
+            isCaller ? 'Waiting for someone to join...' : 'Connecting to call...';
+        await setupCall();
+    });
 
-        if (data.type === 'role') {
-            isCaller = data.isCaller;
-            document.getElementById('status').textContent = 
-                isCaller ? 'Waiting for someone to join...' : 'Connecting to call...';
-            await setupCall();
-        } else if (data.type === 'offer') {
-            await handleOffer(data);
-        } else if (data.type === 'answer') {
-            await handleAnswer(data);
-        } else if (data.type === 'candidate') {
-            await handleCandidate(data);
-        }
-    };
-
-    ws.onerror = (error) => {
-        console.error('WebSocket error:', error);
-        document.getElementById('status').textContent = 'Connection error. Please refresh.';
-    };
+    socket.on('offer', handleOffer);
+    socket.on('answer', handleAnswer);
+    socket.on('candidate', handleCandidate);
+    socket.on('peerDisconnected', () => {
+        document.getElementById('status').textContent = 'Peer disconnected. Refresh to start a new call.';
+        hangup();
+    });
 }
 
 async function setupCall() {
     try {
-        // Check if mediaDevices is supported
         if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
             throw new Error('MediaDevices API not supported in this browser');
         }
 
-        // Request audio access
         localStream = await navigator.mediaDevices.getUserMedia({
             audio: true,
             video: false
@@ -69,10 +58,7 @@ async function setupCall() {
 
         peerConnection.onicecandidate = (event) => {
             if (event.candidate) {
-                ws.send(JSON.stringify({
-                    type: 'candidate',
-                    candidate: event.candidate
-                }));
+                socket.emit('candidate', event.candidate);
             }
         };
 
@@ -84,52 +70,38 @@ async function setupCall() {
         if (isCaller) {
             const offer = await peerConnection.createOffer();
             await peerConnection.setLocalDescription(offer);
-            ws.send(JSON.stringify({
-                type: 'offer',
-                offer: offer
-            }));
+            socket.emit('offer', offer);
         }
     } catch (error) {
         console.error('Error setting up call:', error);
         document.getElementById('status').textContent = 
             'Error setting up call: ' + error.message;
-        
-        // Re-enable buttons in case of error
-        document.getElementById('muteButton').disabled = true;
-        document.getElementById('hangupButton').disabled = false;
     }
 }
 
-async function handleOffer(data) {
+async function handleOffer(offer) {
     try {
-        await peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer));
+        await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
         const answer = await peerConnection.createAnswer();
         await peerConnection.setLocalDescription(answer);
-        ws.send(JSON.stringify({
-            type: 'answer',
-            answer: answer
-        }));
+        socket.emit('answer', answer);
     } catch (error) {
         console.error('Error handling offer:', error);
-        document.getElementById('status').textContent = 
-            'Error connecting to peer: ' + error.message;
     }
 }
 
-async function handleAnswer(data) {
+async function handleAnswer(answer) {
     try {
-        await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
+        await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
     } catch (error) {
         console.error('Error handling answer:', error);
-        document.getElementById('status').textContent = 
-            'Error connecting to peer: ' + error.message;
     }
 }
 
-async function handleCandidate(data) {
+async function handleCandidate(candidate) {
     try {
-        if (data.candidate) {
-            await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
+        if (candidate) {
+            await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
         }
     } catch (error) {
         console.error('Error handling candidate:', error);
@@ -154,18 +126,12 @@ function hangup() {
     if (localStream) {
         localStream.getTracks().forEach(track => track.stop());
     }
-    if (ws) {
-        ws.close();
+    if (socket) {
+        socket.close();
     }
     
-    // Reset UI
     document.getElementById('muteButton').disabled = true;
     document.getElementById('status').textContent = 'Call ended. Refresh to start a new call.';
-    
-    // Optional: reload the page after a short delay
-    setTimeout(() => {
-        window.location.reload();
-    }, 2000);
 }
 
 // Start connection when page loads

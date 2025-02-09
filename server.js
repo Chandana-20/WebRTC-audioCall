@@ -1,25 +1,19 @@
 const express = require('express');
-const http = require('http');
-const WebSocket = require('ws');
-const path = require('path');
-
 const app = express();
-const server = http.createServer(app);
-const wss = new WebSocket.Server({ server });
+const http = require('http').createServer(app);
+const io = require('socket.io')(http);
+const path = require('path');
 
 // Serve static files
 app.use(express.static(path.join(__dirname, 'public')));
-
-// Basic route for the home page
-app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'index.html'));
-});
 
 // Store active connections
 const webrtc_discussions = new Map();
 let waitingCallers = new Set();
 
-wss.on('connection', (ws) => {
+io.on('connection', (socket) => {
+    console.log('User connected:', socket.id);
+    
     const isCallee = waitingCallers.size > 0;
     let call_token;
 
@@ -38,50 +32,58 @@ wss.on('connection', (ws) => {
         waitingCallers.add(call_token);
     }
 
-    webrtc_discussions.set(call_token, ws);
+    webrtc_discussions.set(call_token, socket);
 
     // Send initial role assignment
-    ws.send(JSON.stringify({
-        type: 'role',
+    socket.emit('role', {
         isCaller: !isCallee,
         call_token: call_token
-    }));
+    });
 
-    ws.on('message', (message) => {
-        try {
-            const data = JSON.parse(message);
-            // Forward the message to the other peer
-            for (const [token, client] of webrtc_discussions.entries()) {
-                if (token === call_token && client !== ws) {
-                    client.send(message.toString());
-                    break;
-                }
+    // Handle WebRTC signaling
+    socket.on('offer', (data) => {
+        for (const [token, peer] of webrtc_discussions.entries()) {
+            if (token === call_token && peer !== socket) {
+                peer.emit('offer', data);
+                break;
             }
-        } catch (error) {
-            console.error('Error processing message:', error);
         }
     });
 
-    ws.on('close', () => {
-        waitingCallers.delete(call_token);
-        webrtc_discussions.delete(call_token);
+    socket.on('answer', (data) => {
+        for (const [token, peer] of webrtc_discussions.entries()) {
+            if (token === call_token && peer !== socket) {
+                peer.emit('answer', data);
+                break;
+            }
+        }
     });
 
-    ws.on('error', (error) => {
-        console.error('WebSocket error:', error);
+    socket.on('candidate', (data) => {
+        for (const [token, peer] of webrtc_discussions.entries()) {
+            if (token === call_token && peer !== socket) {
+                peer.emit('candidate', data);
+                break;
+            }
+        }
+    });
+
+    socket.on('disconnect', () => {
+        console.log('User disconnected:', socket.id);
+        waitingCallers.delete(call_token);
+        webrtc_discussions.delete(call_token);
+        
+        // Notify peers about disconnection
+        for (const [token, peer] of webrtc_discussions.entries()) {
+            if (token === call_token && peer !== socket) {
+                peer.emit('peerDisconnected');
+                break;
+            }
+        }
     });
 });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, '0.0.0.0', () => {
+http.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on port ${PORT}`);
-});
-
-// Handle server errors
-server.on('error', (error) => {
-    console.error('Server error:', error);
-});
-
-process.on('unhandledRejection', (error) => {
-    console.error('Unhandled rejection:', error);
 });

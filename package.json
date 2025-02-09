@@ -4,7 +4,7 @@
   "description": "Simple WebRTC audio call application",
   "main": "server.js",
   "engines": {
-    "node": ">=16.0.0"
+    "node": "18.x"
   },
   "scripts": {
     "start": "node server.js",
@@ -12,6 +12,6 @@
   },
   "dependencies": {
     "express": "^4.18.2",
-    "ws": "^8.13.0"
+    "socket.io": "^4.7.2"
   }
 }
