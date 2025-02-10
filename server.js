@@ -4,69 +4,92 @@ const http = require('http').createServer(app);
 const io = require('socket.io')(http);
 const path = require('path');
 
-// Serve static files
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Store active connections
-const webrtc_discussions = new Map();
+const webrtc_rooms = new Map(); // Map to store room information
 let waitingCallers = new Set();
 
 io.on('connection', (socket) => {
     console.log('User connected:', socket.id);
 
     let isCaller = true;
-    let call_token;
+    let roomId;
 
     // Check if there's an available caller
     if (waitingCallers.size > 0) {
-        // Assign to the first available caller
-        call_token = [...waitingCallers][0];
-        waitingCallers.delete(call_token);
+        // Get the first waiting caller's room
+        roomId = [...waitingCallers][0];
+        waitingCallers.delete(roomId);
         isCaller = false; // This user is a callee
+        
+        // Add this socket to the room
+        const room = webrtc_rooms.get(roomId);
+        if (room) {
+            room.callee = socket;
+            // Notify both parties that they're now paired
+            room.caller.emit('paired');
+            socket.emit('paired');
+        }
     } else {
-        // Create a new session for the caller
-        call_token = Date.now().toString();
-        waitingCallers.add(call_token);
+        // Create a new room for the caller
+        roomId = Date.now().toString();
+        waitingCallers.add(roomId);
+        webrtc_rooms.set(roomId, {
+            caller: socket,
+            callee: null
+        });
     }
 
-    // Store the socket in discussions
-    webrtc_discussions.set(call_token, socket);
+    // Store the room ID on the socket for easy reference
+    socket.roomId = roomId;
 
     // Notify the client of their role
-    socket.emit('role', { isCaller, call_token });
+    socket.emit('role', { isCaller, roomId });
 
     // Handle WebRTC signaling
     socket.on('offer', (data) => {
-        const peer = webrtc_discussions.get(call_token);
-        if (peer && peer !== socket) {
-            peer.emit('offer', data);
+        const room = webrtc_rooms.get(socket.roomId);
+        if (room && room.callee) {
+            room.callee.emit('offer', data);
         }
     });
 
     socket.on('answer', (data) => {
-        const peer = webrtc_discussions.get(call_token);
-        if (peer && peer !== socket) {
-            peer.emit('answer', data);
+        const room = webrtc_rooms.get(socket.roomId);
+        if (room && room.caller) {
+            room.caller.emit('answer', data);
         }
     });
 
     socket.on('candidate', (data) => {
-        const peer = webrtc_discussions.get(call_token);
-        if (peer && peer !== socket) {
-            peer.emit('candidate', data);
+        const room = webrtc_rooms.get(socket.roomId);
+        if (room) {
+            const peer = socket === room.caller ? room.callee : room.caller;
+            if (peer) {
+                peer.emit('candidate', data);
+            }
         }
     });
 
     // Handle disconnections
     socket.on('disconnect', () => {
         console.log('User disconnected:', socket.id);
-        waitingCallers.delete(call_token);
-        webrtc_discussions.delete(call_token);
-
-        // Notify the peer of disconnection
-        const peer = webrtc_discussions.get(call_token);
-        if (peer) {
-            peer.emit('peerDisconnected');
+        const roomId = socket.roomId;
+        
+        if (roomId) {
+            // Remove from waiting callers if they were waiting
+            waitingCallers.delete(roomId);
+            
+            // Notify peer and cleanup room
+            const room = webrtc_rooms.get(roomId);
+            if (room) {
+                const peer = socket === room.caller ? room.callee : room.caller;
+                if (peer) {
+                    peer.emit('peerDisconnected');
+                }
+                webrtc_rooms.delete(roomId);
+            }
         }
     });
 });
